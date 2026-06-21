@@ -1,6 +1,6 @@
 import { _decorator, Component, Graphics, UITransform, Color, EventTouch, Node, Prefab, instantiate, Vec3, Label } from 'cc';
 import { GomokuAI } from './GomukuAI';
-const { ccclass, property} = _decorator
+const { ccclass, property } = _decorator;
 
 @ccclass('Board')
 export class Board extends Component {
@@ -11,13 +11,14 @@ export class Board extends Component {
     @property(Prefab) public blackStonePrefab: Prefab = null;
     @property(Prefab) public whiteStonePrefab: Prefab = null;
 
-    // UI overlays
+    // --- UI OVERLAYS ---
     @property(Node) public homeOverlay: Node = null;
     @property(Node) public roleSelectionPanel: Node = null;
+    @property(Node) public levelSelectionPanel: Node = null;
     @property(Node) public playButtonNode: Node = null;
     @property(Node) public resultOverlay: Node = null;
     @property(Label) public resultLabel: Label = null;
-    
+
     private boardDimension: number = 15;
     private margin: number = 30;
     private cellSize: number = 0;
@@ -25,17 +26,17 @@ export class Board extends Component {
     private startY: number = 0;
     private boardState: number[][] = [];
 
-    // state management
+    // --- STATE MANAGEMENT ---
     private isGameActive: boolean = false;
     private currentPlayer: number = 1; 
-    private humanColor: number = 1; // 1 = Hitam, 2 = Putih
+    private humanColor: number = 1; 
     private aiColor: number = 2;
+    private aiLevel: string = "Easy"; 
 
     start() {
         this.initBoardState();
         this.drawGrid();
         this.node.on(Node.EventType.TOUCH_END, this.onTouchEnd, this);
-        
         this.showHome();
     }
 
@@ -49,13 +50,14 @@ export class Board extends Component {
         }
     }
 
-    // === VISUALISASI DAN UI ===
+    // === VISUAL & UI ===
 
     public showHome() {
         this.isGameActive = false;
         this.homeOverlay.active = true;
         this.playButtonNode.active = true;
         this.roleSelectionPanel.active = false;
+        this.levelSelectionPanel.active = false; 
         this.resultOverlay.active = false;
     }
 
@@ -68,6 +70,13 @@ export class Board extends Component {
         this.humanColor = parseInt(customEventData);
         this.aiColor = this.humanColor === 1 ? 2 : 1;
 
+        this.roleSelectionPanel.active = false;
+        this.levelSelectionPanel.active = true;
+    }
+
+    public onSelectLevel(event: EventTouch, customEventData: string) {
+        this.aiLevel = customEventData;
+        
         this.homeOverlay.active = false;
         this.startGame();
     }
@@ -75,11 +84,12 @@ export class Board extends Component {
     public startGame() {
         this.stoneContainer.removeAllChildren();
         this.initBoardState();
-        this.currentPlayer = 1;
+        this.currentPlayer = 1; 
         this.isGameActive = true;
         this.updateStatus();
 
-        console.log(`Game Dimulai! Player adalah: ${this.humanColor === 1 ? 'Hitam' : 'Putih'}`);
+        console.log(`GAME DIMULAI!`);
+        console.log(`Pemain: ${this.humanColor === 1 ? 'Hitam' : 'Putih'} | Level AI: ${this.aiLevel}`);
 
         if (this.aiColor === 1) {
             this.triggerAITurn();
@@ -98,26 +108,16 @@ export class Board extends Component {
     }
     
     public triggerAITurn() {
-        console.log("AI sedang berpikir...");
+        console.log(`AI (${this.aiLevel}) sedang berpikir...`);
 
-        // Tambahkan sedikit jeda/delay (misal 0.5 detik) agar terasa natural
-        // Jika AI jalan terlalu cepat (instan), pemain akan merasa pusing.
         this.scheduleOnce(() => {
-            
-            // Panggil Otak AI untuk meminta langkah acak
             const move = GomokuAI.getRandomMove(this.boardState, this.boardDimension);
             
             if (move) {
-                const [row, col] = move; // Pecah array [baris, kolom]
-                
-                // Eksekusi peletakan bidak secara visual di papan
+                const [row, col] = move;
                 this.placeStone(row, col, this.aiColor);
-            } else {
-                console.log("PAPAN PENUH! SERI!");
-                // Opsional: Kamu bisa membuat triggerGameOver khusus seri di sini
             }
-            
-        }, 0.5); // Angka 0.5 adalah waktu tunggu dalam detik
+        }, 0.5);
     }
 
     // === GAMEPLAY ===
@@ -184,11 +184,9 @@ export class Board extends Component {
             return;
         }
 
-        // putar giliran
         this.currentPlayer = this.currentPlayer === 1 ? 2 : 1;
         this.updateStatus();
 
-        // jika giliran selanjutnya adalah AI, panggil AI
         if (this.isGameActive && this.currentPlayer === this.aiColor) {
             this.triggerAITurn();
         }
