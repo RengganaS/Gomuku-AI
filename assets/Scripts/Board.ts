@@ -111,7 +111,8 @@ export class Board extends Component {
         console.log(`AI (${this.aiLevel}) sedang berpikir...`);
 
         this.scheduleOnce(() => {
-            const move = GomokuAI.getRandomMove(this.boardState, this.boardDimension);
+            
+            const move = GomokuAI.getBestMove(this.boardState, this.boardDimension, this.aiColor, this.aiLevel);
             
             if (move) {
                 const [row, col] = move;

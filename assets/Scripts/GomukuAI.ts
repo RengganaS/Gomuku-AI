@@ -1,32 +1,64 @@
 export class GomokuAI {
     
-    /**
-     * AI Level 0: Random Placement
-     * AI ini akan mengumpulkan semua titik kosong di papan, 
-     * lalu memilih salah satunya secara acak.
-     */
-    static getRandomMove(boardState: number[][], dimension: number): [number, number] | null {
-        let emptySpots: [number, number][] = [];
+    // AI lihat 5x5 dari bidak yang udah di taro
+    static getCandidateMoves(boardState: number[][], dimension: number): [number, number][] {
+        const moves: [number, number][] = [];
+        const hasNeighbor = (row: number, col: number): boolean => {
+            for (let r = Math.max(0, row - 2); r <= Math.min(dimension - 1, row + 2); r++) {
+                for (let c = Math.max(0, col - 2); c <= Math.min(dimension - 1, col + 2); c++) {
+                    if (boardState[r][c] !== 0) return true; 
+                }                
+            }
+            return false;
+        };
 
-        // 1. Kumpulkan semua koordinat yang masih kosong (bernilai 0)
+        let isEmptyBoard = true;
+
         for (let r = 0; r < dimension; r++) {
             for (let c = 0; c < dimension; c++) {
-                if (boardState[r][c] === 0) {
-                    emptySpots.push([r, c]); // Simpan ke array
+                if (boardState[r][c] !== 0) {
+                    isEmptyBoard = false;
+                } else if (hasNeighbor(r, c)) {
+                    moves.push([r, c]);
                 }
             }
         }
 
-        // 2. Keamanan: Jika papan sudah penuh, kembalikan null
-        if (emptySpots.length === 0) {
-            return null;
+        if (isEmptyBoard) {
+            const mid = Math.floor(dimension / 2);
+            return [[mid, mid]];
         }
 
-        // 3. Pilih indeks acak dari array titik kosong tersebut
-        const randomIndex = Math.floor(Math.random() * emptySpots.length);
-        
-        // 4. Kembalikan koordinat [baris, kolom] yang terpilih
-        return emptySpots[randomIndex];
+        return moves;
     }
 
+    // fungsi utama
+    static getBestMove(boardState: number[][], dimension: number, aiColor: number, level: string): [number, number] | null {
+        const candidates = this.getCandidateMoves(boardState, dimension);
+        if (candidates.length === 0) return null;
+
+        let blunderChance = 0;
+        let searchDepth = 2;
+
+        if (level === "Easy") {
+            blunderChance = 0.4;
+            searchDepth = 2;
+        } else if (level === "Medium") {
+            blunderChance = 0.1;
+            searchDepth = 3;
+        } else if (level === "Hard") {
+            blunderChance = 0.0;
+            searchDepth = 4;
+        }
+
+        if (Math.random() < blunderChance) {
+            console.log(`[AI Level: ${level}] Ops, AI melakukan blunder! (Random move)`);
+            const randomIndex = Math.floor(Math.random() * candidates.length);
+            return candidates[randomIndex];
+        }
+
+        console.log(`[AI Level: ${level}] AI berpikir serius dengan Depth ${searchDepth}...`);
+
+        return candidates[0];
+    }
 }
