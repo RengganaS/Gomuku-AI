@@ -22,6 +22,9 @@ export class Board extends Component {
 
     private boardState: number[][] = [];
 
+    private currentPlayer: number = 1; // 1 = hitam (Player), 2 = putih (AI)
+    private isGameOver: boolean = false;
+
     start() {
         this.initBoardState();
         this.drawGrid();
@@ -71,6 +74,8 @@ export class Board extends Component {
     }
 
     onTouchEnd(event: EventTouch) {
+        if (this.isGameOver) return;
+
         const touchPos = event.getUILocation();
         const uiTransform = this.getComponent(UITransform);
         const localPos = uiTransform.convertToNodeSpaceAR(new Vec3(touchPos.x, touchPos.y, 0));
@@ -80,7 +85,7 @@ export class Board extends Component {
 
         if (col >= 0 && col < this.boardDimension && row >= 0 && row < this.boardDimension) {
             if (this.boardState[row][col] === 0) {
-                this.placeStone(row, col, 1);
+                this.placeStone(row, col, this.currentPlayer);
             }
         }
     }
@@ -96,5 +101,43 @@ export class Board extends Component {
         const posX = this.startX + (col * this.cellSize);
         const posY = this.startY + (row * this.cellSize);
         stoneNode.setPosition(new Vec3(posX, posY, 0));
+
+        if (this.checkWin(row, col, playerType)) {
+            console.log(`Pemain ${playerType === 1 ? 'Hitam' : 'Putih'} Menang!`);
+            this.isGameOver = true;
+            return;
+        }
+
+        this.currentPlayer = this.currentPlayer === 1 ? 2 : 1;
+    }
+
+    checkWin(row: number, col: number, player: number): boolean {
+        const directions = [
+            [[0, 1], [0, -1]],   // Horizontal
+            [[1, 0], [-1, 0]],   // Vertikal
+            [[1, 1], [-1, -1]],  // Diagonal /
+            [[-1, 1], [1, -1]]   // Diagonal \
+        ];
+
+        for (const axis of directions) {
+            let consecutiveStones = 1;
+
+            for (const [dRow, dCol] of axis) {
+                let r = row + dRow;
+                let c = col + dCol;
+                
+                while (r >= 0 && r < this.boardDimension && c >= 0 && c < this.boardDimension && this.boardState[r][c] === player) {
+                    consecutiveStones++;
+                    r += dRow;
+                    c += dCol;
+                }
+            }
+
+            if (consecutiveStones >= 5) {
+                return true; 
+            }
+        }
+
+        return false;
     }
 }

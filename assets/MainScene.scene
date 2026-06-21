@@ -452,6 +452,14 @@
     "gridGraphics": {
       "__id__": 8
     },
+    "blackStonePrefab": {
+      "__uuid__": "e7480eb7-de0e-4c6c-ac03-01db1c4d93c0",
+      "__expectedType__": "cc.Prefab"
+    },
+    "whiteStonePrefab": {
+      "__uuid__": "d522da2c-997b-49bd-abfd-b614d60c187e",
+      "__expectedType__": "cc.Prefab"
+    },
     "_id": "10KzocimZPLKSDaxvLZq5o"
   },
   {
