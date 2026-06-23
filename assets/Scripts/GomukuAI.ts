@@ -103,9 +103,19 @@ export class GomokuAI {
 
         console.log(`[AI Level: ${level}] AI berpikir maksimal ${this.MAX_TIME_MS/1000} detik...`);
 
-        let bestScore = -Infinity;
-        let bestMove = candidates[0]; // fallback aman
         const humanColor = aiColor === 1 ? 2 : 1;
+
+        const winningMove = this.findImmediateWinningMove(boardState, dimension, aiColor);
+        if (winningMove) {
+            console.log("AI menemukan langkah menang.");
+            return winningMove;
+        }
+
+        const blockingMove = this.findImmediateWinningMove(boardState, dimension, humanColor);
+        if (blockingMove) {
+            console.log("AI memblokir kemenangan lawan.");
+            return blockingMove;
+        }
 
         // debug: liat performance
         this.nodesEvaluated = 0;
@@ -169,7 +179,7 @@ export class GomokuAI {
         const endTime = performance.now();
         console.log(`Total Waktu: ${(endTime - this.startTime).toFixed(2)} ms | Total Cabang: ${this.nodesEvaluated.toLocaleString()} node`);
         
-        return bestMove;
+        return finalBestMove;
     }
 
     static minimax(boardState: number[][], depth: number, alpha: number, beta: number, isMaximizing: boolean, aiColor: number, humanColor: number, dimension: number): number {
@@ -218,6 +228,60 @@ export class GomokuAI {
             }
             return minEval;
         }
+    }
+
+    static findImmediateWinningMove(boardState: number[][], dimension: number, color: number): [number, number] | null {
+        const candidates = this.getCandidateMoves(boardState, dimension, "Hard");
+
+        for (const [r, c] of candidates) {
+            boardState[r][c] = color;
+            const isWin = this.isWinningPosition(boardState, r, c, color, dimension);
+            boardState[r][c] = 0;
+
+            if (isWin) return [r, c];
+        }
+
+        return null;
+    }
+
+    static isWinningPosition(boardState: number[][], row: number, col: number, color: number, dimension: number): boolean {
+        const directions = [
+            [0, 1],
+            [1, 0],
+            [1, 1],
+            [1, -1],
+        ];
+
+        for (const [dr, dc] of directions) {
+            let count = 1;
+
+            count += this.countDirection(boardState, row, col, dr, dc, color, dimension);
+            count += this.countDirection(boardState, row, col, -dr, -dc, color, dimension);
+
+            if (count >= 5) return true;
+        }
+
+        return false;
+    }
+
+    static countDirection(boardState: number[][], row: number, col: number, dr: number, dc: number, color: number, dimension: number): number {
+        let count = 0;
+        let r = row + dr;
+        let c = col + dc;
+
+        while (
+            r >= 0 &&
+            r < dimension &&
+            c >= 0 &&
+            c < dimension &&
+            boardState[r][c] === color
+        ) {
+            count++;
+            r += dr;
+            c += dc;
+        }
+
+        return count;
     }
 
     static evaluateMoveScore(boardState: number[][], r: number, c: number, aiColor: number, humanColor: number, dimension: number): number {
@@ -298,20 +362,22 @@ export class GomokuAI {
 
     static getPatternString(boardState: number[][], r: number, c: number, dr: number, dc: number, myColor: number, enemyColor: number, dimension: number): string {
         let str = "";
-        
-        for (let i = -1; i <= 4; i++) {
-            const nr = r + (dr * i);
-            const nc = c + (dc * i);
-            
+
+        for (let i = -4; i <= 4; i++) {
+            const nr = r + dr * i;
+            const nc = c + dc * i;
+
             if (nr >= 0 && nr < dimension && nc >= 0 && nc < dimension) {
                 const cell = boardState[nr][nc];
+
                 if (cell === myColor) str += "1";
                 else if (cell === enemyColor) str += "2";
                 else str += "0";
             } else {
-                str += "X";
+                str += "2";
             }
         }
+
         return str;
     }
 }
