@@ -3,6 +3,10 @@ export class GomokuAI {
     // debug: track jumlah cabang yang dicek
     static nodesEvaluated: number = 0;
 
+    static startTime: number = 0;
+    static MAX_TIME_MS: number = 2000;
+    static isTimeOut: boolean = false;
+
     /* 
     * pola heuristik.
     * 1 mewakili bidak pemain yang sedang dinilai.
@@ -38,13 +42,16 @@ export class GomokuAI {
     };
     
     // AI lihat 5x5 dari bidak yang udah di taro
-    static getCandidateMoves(boardState: number[][], dimension: number): [number, number][] {
+    static getCandidateMoves(boardState: number[][], dimension: number, level: string): [number, number][] {
         const moves: [number, number][] = [];
+
+        const searchRadius = 1;
+
         const hasNeighbor = (row: number, col: number): boolean => {
-            for (let r = Math.max(0, row - 2); r <= Math.min(dimension - 1, row + 2); r++) {
-                for (let c = Math.max(0, col - 2); c <= Math.min(dimension - 1, col + 2); c++) {
-                    if (boardState[r][c] !== 0) return true; 
-                }                
+            for (let r = Math.max(0, row - searchRadius); r <= Math.min(dimension - 1, row + searchRadius); r++) {
+                for (let c = Math.max(0, col - searchRadius); c <= Math.min(dimension - 1, col + searchRadius); c++) {
+                    if (boardState[r][c] !== 0) return true;
+                }
             }
             return false;
         };
@@ -71,89 +78,116 @@ export class GomokuAI {
 
     // fungsi utama
     static getBestMove(boardState: number[][], dimension: number, aiColor: number, level: string): [number, number] | null {
-        const candidates = this.getCandidateMoves(boardState, dimension);
+        const candidates = this.getCandidateMoves(boardState, dimension, level);
         if (candidates.length === 0) return null;
 
         let blunderChance = 0;
-        let searchDepth = 2;
+        let maxSearchDepth = 2;
 
         if (level === "Easy") {
             blunderChance = 0.4;
-            searchDepth = 2;
+            maxSearchDepth = 2;
         } else if (level === "Medium") {
             blunderChance = 0.1;
-            searchDepth = 3;
+            maxSearchDepth = 3;
         } else if (level === "Hard") {
             blunderChance = 0.0;
-            searchDepth = 4;
+            maxSearchDepth = 4;
         }
 
         if (Math.random() < blunderChance) {
-            console.log(`[AI Level: ${level}] Ops, AI melakukan blunder! (Random move)`);
+            console.log(`[AI Level: ${level}], AI melakukan blunder! (Random move)`);
             const randomIndex = Math.floor(Math.random() * candidates.length);
             return candidates[randomIndex];
         }
 
-        console.log(`[AI Level: ${level}] AI berpikir serius dengan Depth ${searchDepth}...`);
+        console.log(`[AI Level: ${level}] AI berpikir maksimal ${this.MAX_TIME_MS/1000} detik...`);
 
         let bestScore = -Infinity;
         let bestMove = candidates[0]; // fallback aman
         const humanColor = aiColor === 1 ? 2 : 1;
 
         // debug: liat performance
-        const startTime = performance.now();
         this.nodesEvaluated = 0;
 
-        // OPTIMAL BUT TAKE A LONG TIME
-        // candidates.sort((a, b) => {
-        //     const scoreA = this.evaluateMoveScore(boardState, a[0], a[1], aiColor, humanColor, dimension);
-        //     const scoreB = this.evaluateMoveScore(boardState, b[0], b[1], aiColor, humanColor, dimension);
-        //     return scoreB - scoreA; 
-        // });
+        // --- SETUP TIMER ---
+        this.startTime = performance.now(); 
+        this.nodesEvaluated = 0; 
+        this.isTimeOut = false;
 
-        // GOOD ENOUGH
-        this.orderMoves(candidates, boardState, aiColor, humanColor, dimension);
+       candidates.sort((a, b) => {
+            const scoreA = this.evaluateMoveScore(boardState, a[0], a[1], aiColor, humanColor, dimension);
+            const scoreB = this.evaluateMoveScore(boardState, b[0], b[1], aiColor, humanColor, dimension);
+            return scoreB - scoreA; 
+        });
 
-        for (const [r, c] of candidates) {
-            boardState[r][c] = aiColor; 
-            const score = this.minimax(boardState, searchDepth - 1, -Infinity, Infinity, false, aiColor, humanColor, dimension);
-            
-            boardState[r][c] = 0;
+        let finalBestMove = candidates[0];
 
-            if (score > bestScore) {
-                bestScore = score;
-                bestMove = [r, c];
+        for (let currentDepth = 1; currentDepth <= maxSearchDepth; currentDepth++) {
+            candidates.sort((a, b) => {
+                if (a[0] === finalBestMove[0] && a[1] === finalBestMove[1]) return -1;
+                if (b[0] === finalBestMove[0] && b[1] === finalBestMove[1]) return 1;
+                return 0;
+            });
+
+            let depthBestScore = -Infinity;
+            let depthBestMove = candidates[0];
+
+            for (const [r, c] of candidates) {
+                boardState[r][c] = aiColor; 
+                const score = this.minimax(boardState, currentDepth - 1, -Infinity, Infinity, false, aiColor, humanColor, dimension);
+                boardState[r][c] = 0; 
+
+                // jika di tengah jalan waktu habis, jangan update skor/langkah
+                if (this.isTimeOut) break;
+
+                if (score > depthBestScore) {
+                    depthBestScore = score;
+                    depthBestMove = [r, c];
+                }
+            }
+
+            // kika waktu habis saat cek depth ini, buang hasilnya
+            // pakai hasil dari finalBestMove
+            if (this.isTimeOut) {
+                console.warn(`Waktu habis saat cek Depth ${currentDepth}. Menggunakan hasil dari Depth ${currentDepth - 1}.`);
+                break;
+            }
+
+            // jika berhasil menyelesaikan depth ini tanpa timeout, simpan sebagai langkah terbaik
+            finalBestMove = depthBestMove;
+            console.log(`Selesai evaluasi Depth ${currentDepth} - Cabang: ${this.nodesEvaluated.toLocaleString()}`);
+
+            // jika AI menemukan jalur yang skor jutaan, hentikan pencarian
+            if (depthBestScore >= 100000) {
+                console.log(`AI menemukan langkah Kemenangan / Ancaman Fatal di Depth ${currentDepth}! Eksekusi instan.`);
+                break;
             }
         }
 
         // debug: liat performance
         const endTime = performance.now();
-        const timeTaken = (endTime - startTime).toFixed(2);
-        console.log(`Waktu: ${timeTaken} ms | Cabang dievaluasi: ${this.nodesEvaluated.toLocaleString()} node`);
+        console.log(`Total Waktu: ${(endTime - this.startTime).toFixed(2)} ms | Total Cabang: ${this.nodesEvaluated.toLocaleString()} node`);
         
         return bestMove;
     }
 
     static minimax(boardState: number[][], depth: number, alpha: number, beta: number, isMaximizing: boolean, aiColor: number, humanColor: number, dimension: number): number {
+        if (!this.isTimeOut && (performance.now() - this.startTime > this.MAX_TIME_MS)) {
+            this.isTimeOut = true;
+            return isMaximizing ? -Infinity : Infinity;
+        }
+        
         this.nodesEvaluated++;
 
-        if (depth === 0) {
+        if (depth === 0 || this.isTimeOut) {
             return this.evaluateBoard(boardState, dimension, aiColor, humanColor);
         }
 
-        const candidates = this.getCandidateMoves(boardState, dimension);
+        const candidates = this.getCandidateMoves(boardState, dimension, "Hard"); 
         if (candidates.length === 0) return 0;
 
-        // OPTIMAL BUT TAKE A LONG TIME
-        // urutkan kandidat dari yang paling berpotensi ke yang jelek
-        // candidates.sort((a, b) => {
-        //     const scoreA = this.evaluateMoveScore(boardState, a[0], a[1], aiColor, humanColor, dimension);
-        //     const scoreB = this.evaluateMoveScore(boardState, b[0], b[1], aiColor, humanColor, dimension);
-        //     return scoreB - scoreA; // urutkan Descending
-        // });
-
-        // GOOD ENOUGH
-        this.orderMoves(candidates, boardState, aiColor, humanColor, dimension);
+        this.orderMovesFast(candidates, boardState, dimension);
 
         if (isMaximizing) {
             let maxEval = -Infinity;
@@ -161,6 +195,8 @@ export class GomokuAI {
                 boardState[r][c] = aiColor;
                 const evalScore = this.minimax(boardState, depth - 1, alpha, beta, false, aiColor, humanColor, dimension);
                 boardState[r][c] = 0;
+                
+                if (this.isTimeOut) break; // Keluar dari loop jika waktu habis
 
                 maxEval = Math.max(maxEval, evalScore);
                 alpha = Math.max(alpha, evalScore);
@@ -173,6 +209,8 @@ export class GomokuAI {
                 boardState[r][c] = humanColor;
                 const evalScore = this.minimax(boardState, depth - 1, alpha, beta, true, aiColor, humanColor, dimension);
                 boardState[r][c] = 0;
+                
+                if (this.isTimeOut) break;
 
                 minEval = Math.min(minEval, evalScore);
                 beta = Math.min(beta, evalScore);
@@ -182,36 +220,31 @@ export class GomokuAI {
         }
     }
 
-    // OPTIMAL BUT TAKE A LONG TIME
     static evaluateMoveScore(boardState: number[][], r: number, c: number, aiColor: number, humanColor: number, dimension: number): number {
         let score = 0;
         
-        // seberapa bagus petak ini untuk menyerang?
+        // cek potensi Serangan
         boardState[r][c] = aiColor;
         score += this.evaluatePosition(boardState, r, c, aiColor, humanColor, dimension);
         
-        // seberapa bagus petak ini untuk defense
+        // cek potensi defense
         boardState[r][c] = humanColor;
-        score += this.evaluatePosition(boardState, r, c, humanColor, aiColor, dimension);
+        score += this.evaluatePosition(boardState, r, c, humanColor, aiColor, dimension) * 1.5; // Prioritaskan blokir
         
-        boardState[r][c] = 0; 
-        
+        boardState[r][c] = 0;
         return score;
     }
 
-    // NOT OPTIMAL BUT GOOD ENOUGH 
-    static orderMoves(candidates: [number, number][], boardState: number[][], aiColor: number, humanColor: number, dimension: number) {
-        // hanya melihat bidak di sekitar petak
+    static orderMovesFast(candidates: [number, number][], boardState: number[][], dimension: number) {
         candidates.sort((a, b) => {
             const scoreA = this.fastProximityScore(boardState, a[0], a[1], dimension);
             const scoreB = this.fastProximityScore(boardState, b[0], b[1], dimension);
             return scoreB - scoreA; 
         });
     }
-    
+
     static fastProximityScore(boardState: number[][], r: number, c: number, dimension: number): number {
         let score = 0;
-        // hanya cek ring terdekat (radius 1) 
         for (let i = Math.max(0, r - 1); i <= Math.min(dimension - 1, r + 1); i++) {
             for (let j = Math.max(0, c - 1); j <= Math.min(dimension - 1, c + 1); j++) {
                 if (boardState[i][j] !== 0) score++;
