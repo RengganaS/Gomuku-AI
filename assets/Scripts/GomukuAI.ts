@@ -4,7 +4,7 @@ export class GomokuAI {
     static nodesEvaluated: number = 0;
 
     static startTime: number = 0;
-    static MAX_TIME_MS: number = 2000;
+    static MAX_TIME_MS: number = 0;
     static isTimeOut: boolean = false;
 
     /* 
@@ -83,28 +83,26 @@ export class GomokuAI {
 
         let blunderChance = 0;
         let maxSearchDepth = 2;
+        let timeLimit = 0
 
         if (level === "Easy") {
-            blunderChance = 0.4;
+            blunderChance = 0.45;
             maxSearchDepth = 2;
+            timeLimit = 1000;
         } else if (level === "Medium") {
-            blunderChance = 0.1;
+            blunderChance = 0.2;
             maxSearchDepth = 3;
+            timeLimit = 1800;
         } else if (level === "Hard") {
             blunderChance = 0.0;
-            maxSearchDepth = 4;
+            maxSearchDepth = 6;
+            timeLimit = 5000;
         }
 
-        if (Math.random() < blunderChance) {
-            console.log(`[AI Level: ${level}], AI melakukan blunder! (Random move)`);
-            const randomIndex = Math.floor(Math.random() * candidates.length);
-            return candidates[randomIndex];
-        }
-
-        console.log(`[AI Level: ${level}] AI berpikir maksimal ${this.MAX_TIME_MS/1000} detik...`);
+        this.MAX_TIME_MS = timeLimit;
 
         const humanColor = aiColor === 1 ? 2 : 1;
-
+        
         const winningMove = this.findImmediateWinningMove(boardState, dimension, aiColor);
         if (winningMove) {
             console.log("AI menemukan langkah menang.");
@@ -116,6 +114,14 @@ export class GomokuAI {
             console.log("AI memblokir kemenangan lawan.");
             return blockingMove;
         }
+
+        if (Math.random() < blunderChance) {
+            console.log(`[AI Level: ${level}], AI melakukan blunder! (Random move)`);
+            const randomIndex = Math.floor(Math.random() * candidates.length);
+            return candidates[randomIndex];
+        }
+
+        console.log(`[AI Level: ${level}] AI berpikir maksimal ${this.MAX_TIME_MS/1000} detik...`);
 
         // debug: liat performance
         this.nodesEvaluated = 0;
