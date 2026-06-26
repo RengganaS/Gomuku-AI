@@ -7,15 +7,25 @@ export class GomokuAI {
     static MAX_TIME_MS: number = 0;
     static isTimeOut: boolean = false;
 
+    // cache skor aktif
+    // sehingga evaluateBoard() tidak perlu scan seluruh papan lagi.
+    static scoreCache = { ai: 0, human: 0 };
+
+    // Radius maksimal pengaruh sebuah bidak.
+    // Pola terpanjang adalah 5 bidak, jadi bidak baru bisa mempengaruhi
+    // cell lain yang berjarak hingga 4 langkah darinya.
+    static readonly INFLUENCE_RADIUS = 4;
+    // ────────────────────────────────────────────────────────────────────────────
+
     /* 
     * pola heuristik.
     * 1 mewakili bidak pemain yang sedang dinilai.
     * 2 mewakili bidak musuh.
     * 0 mewakili petak kosong.
-    */ 
+    */
     static readonly PATTERN_SCORES: Record<string, number> = {
         // menang
-        "11111": 10000000, 
+        "11111": 10000000,
 
         // open four
         "011110": 1000000,
@@ -23,15 +33,15 @@ export class GomokuAI {
         // blocked four
         "011112": 100000,
         "211110": 100000,
-        "11101": 100000,   
-        "11011": 100000,   
-        "10111": 100000,   
+        "11101": 100000,
+        "11011": 100000,
+        "10111": 100000,
 
         // open three
         "011100": 10000,
         "001110": 10000,
-        "010110": 10000,   // Bolong 1
-        "011010": 10000,   // Bolong 1
+        "010110": 10000,
+        "011010": 10000,
 
         // blocked three / open two
         "001100": 100,
@@ -40,8 +50,93 @@ export class GomokuAI {
         "211100": 100,
         "001112": 100,
     };
-    
-    // AI lihat 5x5 dari bidak yang udah di taro
+
+
+    // incremental scoring
+    // dipanggil sekali sebelum game dimulai, atau saat papan reset
+    // fungsi ini menghitung skor awal dari posisi papan yang diberikan
+    // dan menyimpannya ke scoreCache.
+    //
+    // setelah ini, scoreCache.ai dan scoreCache.human selalu akurat
+    // tanpa perlu scan ulang seluruh papan.
+    //
+    static initScoreCache(boardState: number[][], dimension: number, aiColor: number, humanColor: number): void {
+        this.scoreCache = { ai: 0, human: 0 };
+
+        for (let r = 0; r < dimension; r++) {
+            for (let c = 0; c < dimension; c++) {
+                const color = boardState[r][c];
+                if (color === aiColor) {
+                    this.scoreCache.ai += this.evaluatePosition(boardState, r, c, aiColor, humanColor, dimension);
+                } else if (color === humanColor) {
+                    this.scoreCache.human += this.evaluatePosition(boardState, r, c, humanColor, aiColor, dimension);
+                }
+            }
+        }
+    }
+
+    // incremental scoring , pakai cache
+    static updateScoreCache(
+        boardState: number[][],
+        r: number, c: number,
+        colorPlaced: number,       // warna bidak yang ditaruh (0 = undo/cabut)
+        aiColor: number,
+        humanColor: number,
+        dimension: number
+    ): void {
+        const radius = this.INFLUENCE_RADIUS;
+
+        // kumpul semua cell dalam radius yang berisi bidak (sebelum perubahan)
+        // cell-cell yang kontribusinya harus kita recalculate
+        const affected: [number, number, number][] = []; // [row, col, color]
+
+        for (let dr = -radius; dr <= radius; dr++) {
+            for (let dc = -radius; dc <= radius; dc++) {
+                const nr = r + dr;
+                const nc = c + dc;
+                if (nr < 0 || nr >= dimension || nc < 0 || nc >= dimension) continue;
+                const cellColor = boardState[nr][nc];
+                if (cellColor !== 0) {
+                    affected.push([nr, nc, cellColor]);
+                }
+            }
+        }
+
+        // Langkah 1: KURANGI kontribusi lama dari semua cell yang terpengaruh.
+        for (const [nr, nc, cellColor] of affected) {
+            const enemy = cellColor === aiColor ? humanColor : aiColor;
+            const contrib = this.evaluatePosition(boardState, nr, nc, cellColor, enemy, dimension);
+            if (cellColor === aiColor) this.scoreCache.ai -= contrib;
+            else this.scoreCache.human -= contrib;
+        }
+
+        // Langkah 2: Terapkan perubahan ke boardState.
+        boardState[r][c] = colorPlaced;
+
+        // Langkah 3: TAMBAHKAN kontribusi baru.
+        // Jika ini langkah place (colorPlaced !== 0), bidak baru (r,c) juga ikut dihitung.
+        // Jika ini undo (colorPlaced === 0), cell (r,c) kini kosong, tidak dihitung.
+        const newAffected: [number, number, number][] = [];
+
+        for (const [nr, nc] of affected.map(a => [a[0], a[1]])) {
+            const cellColor = boardState[nr][nc];
+            if (cellColor !== 0) newAffected.push([nr, nc, cellColor]);
+        }
+        // tambahkan bidak baru itu sendiri jika ini langkah place
+        if (colorPlaced !== 0) {
+            newAffected.push([r, c, colorPlaced]);
+        }
+
+        for (const [nr, nc, cellColor] of newAffected) {
+            const enemy = cellColor === aiColor ? humanColor : aiColor;
+            const contrib = this.evaluatePosition(boardState, nr, nc, cellColor, enemy, dimension);
+            if (cellColor === aiColor) this.scoreCache.ai += contrib;
+            else this.scoreCache.human += contrib;
+        }
+    }
+    // ────────────────────────────────────────────────────────────────────────────
+
+    // AI lihat sekitar bidak yang udah di taro
     static getCandidateMoves(boardState: number[][], dimension: number, level: string): [number, number][] {
         const moves: [number, number][] = [];
 
@@ -83,7 +178,7 @@ export class GomokuAI {
 
         let blunderChance = 0;
         let maxSearchDepth = 2;
-        let timeLimit = 0
+        let timeLimit = 0;
 
         if (level === "Easy") {
             blunderChance = 0.45;
@@ -102,7 +197,12 @@ export class GomokuAI {
         this.MAX_TIME_MS = timeLimit;
 
         const humanColor = aiColor === 1 ? 2 : 1;
-        
+
+        // mastiin scoreCache mencerminkan kondisi papan saat ini
+        // sebelum minimax mulai memodifikasi papan bolak-balik.
+        this.initScoreCache(boardState, dimension, aiColor, humanColor);
+        // ─────────────────────────────────────────────────────────────────────────
+
         const winningMove = this.findImmediateWinningMove(boardState, dimension, aiColor);
         if (winningMove) {
             console.log("AI menemukan langkah menang.");
@@ -121,20 +221,16 @@ export class GomokuAI {
             return candidates[randomIndex];
         }
 
-        console.log(`[AI Level: ${level}] AI berpikir maksimal ${this.MAX_TIME_MS/1000} detik...`);
+        console.log(`[AI Level: ${level}] AI berpikir maksimal ${this.MAX_TIME_MS / 1000} detik...`);
 
-        // debug: liat performance
         this.nodesEvaluated = 0;
-
-        // --- SETUP TIMER ---
-        this.startTime = performance.now(); 
-        this.nodesEvaluated = 0; 
+        this.startTime = performance.now();
         this.isTimeOut = false;
 
-       candidates.sort((a, b) => {
+        candidates.sort((a, b) => {
             const scoreA = this.evaluateMoveScore(boardState, a[0], a[1], aiColor, humanColor, dimension);
             const scoreB = this.evaluateMoveScore(boardState, b[0], b[1], aiColor, humanColor, dimension);
-            return scoreB - scoreA; 
+            return scoreB - scoreA;
         });
 
         let finalBestMove = candidates[0];
@@ -150,11 +246,17 @@ export class GomokuAI {
             let depthBestMove = candidates[0];
 
             for (const [r, c] of candidates) {
-                boardState[r][c] = aiColor; 
-                const score = this.minimax(boardState, currentDepth - 1, -Infinity, Infinity, false, aiColor, humanColor, dimension);
-                boardState[r][c] = 0; 
+                // ganti: boardState[r][c] = aiColor
+                // dengan updateScoreCache yang sekaligus mengubah boardState
+                this.updateScoreCache(boardState, r, c, aiColor, aiColor, humanColor, dimension);
+                // ─────────────────────────────────────────────────────────────────
 
-                // jika di tengah jalan waktu habis, jangan update skor/langkah
+                const score = this.minimax(boardState, currentDepth - 1, -Infinity, Infinity, false, aiColor, humanColor, dimension);
+
+                // undo
+                // ganti:  boardState[r][c] = 0
+                // colorPlaced = 0 berarti cabut bidak 
+                this.updateScoreCache(boardState, r, c, 0, aiColor, humanColor, dimension);
                 if (this.isTimeOut) break;
 
                 if (score > depthBestScore) {
@@ -163,44 +265,44 @@ export class GomokuAI {
                 }
             }
 
-            // kika waktu habis saat cek depth ini, buang hasilnya
-            // pakai hasil dari finalBestMove
             if (this.isTimeOut) {
                 console.warn(`Waktu habis saat cek Depth ${currentDepth}. Menggunakan hasil dari Depth ${currentDepth - 1}.`);
                 break;
             }
 
-            // jika berhasil menyelesaikan depth ini tanpa timeout, simpan sebagai langkah terbaik
             finalBestMove = depthBestMove;
             console.log(`Selesai evaluasi Depth ${currentDepth} - Cabang: ${this.nodesEvaluated.toLocaleString()}`);
 
-            // jika AI menemukan jalur yang skor jutaan, hentikan pencarian
             if (depthBestScore >= 100000) {
                 console.log(`AI menemukan langkah Kemenangan / Ancaman Fatal di Depth ${currentDepth}! Eksekusi instan.`);
                 break;
             }
         }
 
-        // debug: liat performance
         const endTime = performance.now();
         console.log(`Total Waktu: ${(endTime - this.startTime).toFixed(2)} ms | Total Cabang: ${this.nodesEvaluated.toLocaleString()} node`);
-        
+
         return finalBestMove;
     }
 
-    static minimax(boardState: number[][], depth: number, alpha: number, beta: number, isMaximizing: boolean, aiColor: number, humanColor: number, dimension: number): number {
+    static minimax(
+        boardState: number[][], depth: number,
+        alpha: number, beta: number, isMaximizing: boolean,
+        aiColor: number, humanColor: number, dimension: number
+    ): number {
         if (!this.isTimeOut && (performance.now() - this.startTime > this.MAX_TIME_MS)) {
             this.isTimeOut = true;
             return isMaximizing ? -Infinity : Infinity;
         }
-        
+
         this.nodesEvaluated++;
 
         if (depth === 0 || this.isTimeOut) {
-            return this.evaluateBoard(boardState, dimension, aiColor, humanColor);
+            const defensiveMultiplier = 1.2;
+            return this.scoreCache.ai - (this.scoreCache.human * defensiveMultiplier);
         }
 
-        const candidates = this.getCandidateMoves(boardState, dimension, "Hard"); 
+        const candidates = this.getCandidateMoves(boardState, dimension, "Hard");
         if (candidates.length === 0) return 0;
 
         this.orderMovesFast(candidates, boardState, dimension);
@@ -208,29 +310,31 @@ export class GomokuAI {
         if (isMaximizing) {
             let maxEval = -Infinity;
             for (const [r, c] of candidates) {
-                boardState[r][c] = aiColor;
+                // place + undo di setiap node 
+                this.updateScoreCache(boardState, r, c, aiColor, aiColor, humanColor, dimension);
                 const evalScore = this.minimax(boardState, depth - 1, alpha, beta, false, aiColor, humanColor, dimension);
-                boardState[r][c] = 0;
-                
-                if (this.isTimeOut) break; // Keluar dari loop jika waktu habis
+                this.updateScoreCache(boardState, r, c, 0, aiColor, humanColor, dimension);
+
+                if (this.isTimeOut) break;
 
                 maxEval = Math.max(maxEval, evalScore);
                 alpha = Math.max(alpha, evalScore);
-                if (beta <= alpha) break; 
+                if (beta <= alpha) break;
             }
             return maxEval;
         } else {
             let minEval = Infinity;
             for (const [r, c] of candidates) {
-                boardState[r][c] = humanColor;
+                // place + undo di setiap node 
+                this.updateScoreCache(boardState, r, c, humanColor, aiColor, humanColor, dimension);
                 const evalScore = this.minimax(boardState, depth - 1, alpha, beta, true, aiColor, humanColor, dimension);
-                boardState[r][c] = 0;
-                
+                this.updateScoreCache(boardState, r, c, 0, aiColor, humanColor, dimension);
+
                 if (this.isTimeOut) break;
 
                 minEval = Math.min(minEval, evalScore);
                 beta = Math.min(beta, evalScore);
-                if (beta <= alpha) break; 
+                if (beta <= alpha) break;
             }
             return minEval;
         }
@@ -251,19 +355,12 @@ export class GomokuAI {
     }
 
     static isWinningPosition(boardState: number[][], row: number, col: number, color: number, dimension: number): boolean {
-        const directions = [
-            [0, 1],
-            [1, 0],
-            [1, 1],
-            [1, -1],
-        ];
+        const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
 
         for (const [dr, dc] of directions) {
             let count = 1;
-
             count += this.countDirection(boardState, row, col, dr, dc, color, dimension);
             count += this.countDirection(boardState, row, col, -dr, -dc, color, dimension);
-
             if (count >= 5) return true;
         }
 
@@ -275,13 +372,7 @@ export class GomokuAI {
         let r = row + dr;
         let c = col + dc;
 
-        while (
-            r >= 0 &&
-            r < dimension &&
-            c >= 0 &&
-            c < dimension &&
-            boardState[r][c] === color
-        ) {
+        while (r >= 0 && r < dimension && c >= 0 && c < dimension && boardState[r][c] === color) {
             count++;
             r += dr;
             c += dc;
@@ -292,15 +383,13 @@ export class GomokuAI {
 
     static evaluateMoveScore(boardState: number[][], r: number, c: number, aiColor: number, humanColor: number, dimension: number): number {
         let score = 0;
-        
-        // cek potensi Serangan
+
         boardState[r][c] = aiColor;
         score += this.evaluatePosition(boardState, r, c, aiColor, humanColor, dimension);
-        
-        // cek potensi defense
+
         boardState[r][c] = humanColor;
-        score += this.evaluatePosition(boardState, r, c, humanColor, aiColor, dimension) * 1.5; // Prioritaskan blokir
-        
+        score += this.evaluatePosition(boardState, r, c, humanColor, aiColor, dimension) * 1.5;
+
         boardState[r][c] = 0;
         return score;
     }
@@ -309,7 +398,7 @@ export class GomokuAI {
         candidates.sort((a, b) => {
             const scoreA = this.fastProximityScore(boardState, a[0], a[1], dimension);
             const scoreB = this.fastProximityScore(boardState, b[0], b[1], dimension);
-            return scoreB - scoreA; 
+            return scoreB - scoreA;
         });
     }
 
@@ -323,6 +412,8 @@ export class GomokuAI {
         return score;
     }
 
+    // evaluateBoard() sekarang hanya dipakai untuk inisialisasi cache
+    // minimax tidak memanggilnya lagi.
     static evaluateBoard(boardState: number[][], dimension: number, aiColor: number, humanColor: number): number {
         let aiScore = 0;
         let humanScore = 0;
@@ -336,26 +427,23 @@ export class GomokuAI {
                 }
             }
         }
-        
-        // jika skor serangan musuh tinggi/mau menang, bobotnya lebih berat
-        // agar AI memprioritaskan defense daripada menyerang.
-        const defensiveMultiplier = 1.2; 
-        
+
+        const defensiveMultiplier = 1.2;
         return aiScore - (humanScore * defensiveMultiplier);
     }
-    
+
     static evaluatePosition(boardState: number[][], r: number, c: number, myColor: number, enemyColor: number, dimension: number): number {
         let totalScore = 0;
         const directions = [
-            [0, 1],   // Horizontal
-            [1, 0],   // Vertikal
-            [1, 1],   // Diagonal Kanan \
-            [1, -1]   // Diagonal Kiri /
+            [0, 1],
+            [1, 0],
+            [1, 1],
+            [1, -1]
         ];
 
         for (const [dr, dc] of directions) {
             const pattern = this.getPatternString(boardState, r, c, dr, dc, myColor, enemyColor, dimension);
-            
+
             for (const key in this.PATTERN_SCORES) {
                 if (pattern.includes(key)) {
                     totalScore += this.PATTERN_SCORES[key];
@@ -375,7 +463,6 @@ export class GomokuAI {
 
             if (nr >= 0 && nr < dimension && nc >= 0 && nc < dimension) {
                 const cell = boardState[nr][nc];
-
                 if (cell === myColor) str += "1";
                 else if (cell === enemyColor) str += "2";
                 else str += "0";
